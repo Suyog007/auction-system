@@ -1,19 +1,32 @@
-const { ethers } = require("hardhat");
+const { ethers, upgrades } = require("hardhat");
 
 async function main() {
   const [deployer] = await ethers.getSigners();
 
   console.log("Deploying with:", deployer.address);
-  console.log("Balance:", ethers.formatEther(
-    await ethers.provider.getBalance(deployer.address)
-  ));
+  console.log(
+    "Balance:",
+    ethers.formatEther(await ethers.provider.getBalance(deployer.address))
+  );
 
-  const AuctionSystem = await ethers.getContractFactory("AuctionSystem");
-  const auction = await AuctionSystem.deploy();
+  // 👇 IMPORTANT: upgradeable contract factory
+  const AuctionSystem = await ethers.getContractFactory(
+    "AuctionSystemUpgradeable"
+  );
 
-  await auction.waitForDeployment();
+  // 👇 Deploy proxy instead of normal contract
+  const auctionProxy = await upgrades.deployProxy(
+    AuctionSystem,
+    [], // constructor args → initialize args
+    { initializer: "initialize" }
+  );
 
-  console.log("AuctionSystem deployed to:", await auction.getAddress());
+  await auctionProxy.waitForDeployment();
+
+  console.log(
+    "AuctionSystem PROXY deployed to:",
+    await auctionProxy.getAddress()
+  );
 }
 
 main().catch((error) => {

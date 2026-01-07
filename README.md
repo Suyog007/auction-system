@@ -42,6 +42,14 @@ npm run compile
 npm test
 ```
 
+## Add an admin (owner-only)
+
+If you deployed the contract behind a proxy, use the **proxy address**:
+
+```bash
+npx hardhat run scripts/addAdmin.js --network <network>
+```
+
 ## Environment variables
 
 Create a `.env` file in `auction-system/`:
