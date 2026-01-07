@@ -47,6 +47,45 @@ describe("AuctionSystem", function () {
         )
       ).to.be.reverted;
     });
+
+    it("should allow owner to add admin and admin can create auction", async function () {
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+
+      await expect(auction.addAdmin(alice.address))
+        .to.emit(auction, "AdminUpdated")
+        .withArgs(alice.address, true);
+
+      await expect(
+        auction.connect(alice).createAuction(
+          now + 10,
+          now + 100,
+          MIN_BID
+        )
+      ).to.emit(auction, "AuctionCreated");
+    });
+
+    it("should not allow non-owner to add admin", async function () {
+      await expect(
+        auction.connect(alice).addAdmin(bob.address)
+      ).to.be.reverted;
+    });
+
+    it("should prevent removed admin from creating auction", async function () {
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+
+      await auction.addAdmin(alice.address);
+      await expect(auction.removeAdmin(alice.address))
+        .to.emit(auction, "AdminUpdated")
+        .withArgs(alice.address, false);
+
+      await expect(
+        auction.connect(alice).createAuction(
+          now + 10,
+          now + 100,
+          MIN_BID
+        )
+      ).to.be.revertedWith("Not admin");
+    });
   });
 
   describe("Bidding", function () {
