@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 
 /**
- * @title AuctionSystem
- * @notice Slot-based auction where top 3 bidders win
- * @dev Uses OpenZeppelin Ownable & ReentrancyGuard
+ * @title AuctionSystemUpgradeable
+ * @notice Slot-based auction where top 3 bidders win (Upgradeable)
  */
-contract AuctionSystem is Ownable, ReentrancyGuard {
+contract AuctionSystemUpgradeable is
+    Initializable,
+    OwnableUpgradeable,
+    ReentrancyGuardUpgradeable
+{
     // ============ Structs ============
 
     struct Slot {
@@ -70,11 +74,15 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
         _;
     }
 
-    // ============ Constructor ============
+    // ============ Initializer (replaces constructor) ============
 
-    constructor() Ownable(msg.sender) {
+    function initialize() public initializer {
+        __Ownable_init(msg.sender);
+        __ReentrancyGuard_init();
+
         minimumBidAmount = 0.000001 ether;
         admins[msg.sender] = true;
+
         emit AdminUpdated(msg.sender, true);
     }
 
@@ -134,12 +142,13 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
         string calldata name,
         string calldata description,
         string calldata metadata
-    ) external onlyOwner auctionEnded {
+    ) external auctionEnded {
         require(slot < 3, "Invalid slot");
         require(auctionFinalized[currentAuctionId], "Not finalized");
 
         Slot storage s = auctionSlots[currentAuctionId][slot];
         require(msg.sender == s.winner, "Not winner");
+
         s.name = name;
         s.description = description;
         s.metadata = metadata;
@@ -182,7 +191,6 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
         uint256 amount = bidderTotalAmount[currentAuctionId][msg.sender];
         require(amount > 0, "Nothing to refund");
 
-        // winners cannot refund
         for (uint256 i = 0; i < 3; i++) {
             require(
                 auctionSlots[currentAuctionId][i].winner != msg.sender,
@@ -234,6 +242,7 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
             for (uint256 j = i + 1; j < count; j++) {
                 if (totals[j] > totals[max]) max = j;
             }
+
             (totals[i], totals[max]) = (totals[max], totals[i]);
             (seen[i], seen[max]) = (seen[max], seen[i]);
 
@@ -242,18 +251,21 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
         }
     }
 
-    function getRemainingTime() external view returns (uint256) {
-        if (block.timestamp >= auctionEndTime) return 0;
-        return auctionEndTime - block.timestamp;
-    }
-
     function getBidderTotalAmount(address bidder) external view returns (uint256) {
-    return bidderTotalAmount[currentAuctionId][bidder];
+        return bidderTotalAmount[currentAuctionId][bidder];
     }
 
     function getCurrentAuctionSlots() external view returns (Slot[3] memory slots) {
         slots = auctionSlots[currentAuctionId];
     }
 
+    function getRemainingTime() external view returns (uint256) {
+        if (block.timestamp >= auctionEndTime) return 0;
+        return auctionEndTime - block.timestamp;
+    }
+
     receive() external payable {}
+
+    // ============ Storage Gap (future-proofing) ============
+    uint256[50] private __gap;
 }
