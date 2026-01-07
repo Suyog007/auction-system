@@ -1,7 +1,7 @@
 const { expect } = require("chai");
-const { ethers } = require("hardhat");
+const { ethers, upgrades } = require("hardhat");
 
-describe("AuctionSystem", function () {
+describe("AuctionSystemUpgradeable", function () {
   let AuctionSystem;
   let auction;
   let owner, alice, bob, carol, dave;
@@ -16,9 +16,20 @@ describe("AuctionSystem", function () {
   beforeEach(async function () {
     [owner, alice, bob, carol, dave] = await ethers.getSigners();
 
-    AuctionSystem = await ethers.getContractFactory("AuctionSystem");
-    auction = await AuctionSystem.deploy();
+    AuctionSystem = await ethers.getContractFactory("AuctionSystemUpgradeable");
+    auction = await upgrades.deployProxy(AuctionSystem, [], { initializer: "initialize" });
     await auction.waitForDeployment();
+  });
+
+  describe("Initialization", function () {
+    it("should set owner and make owner an admin", async function () {
+      expect(await auction.owner()).to.equal(owner.address);
+      expect(await auction.admins(owner.address)).to.equal(true);
+    });
+
+    it("should not allow initialize twice", async function () {
+      await expect(auction.initialize()).to.be.reverted;
+    });
   });
 
   describe("Auction Creation", function () {
@@ -45,7 +56,7 @@ describe("AuctionSystem", function () {
           now + 100,
           MIN_BID
         )
-      ).to.be.reverted;
+      ).to.be.revertedWith("Not admin");
     });
 
     it("should allow owner to add admin and admin can create auction", async function () {
