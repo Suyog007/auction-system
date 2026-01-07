@@ -39,6 +39,10 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
     mapping(uint256 => mapping(address => bool)) public refunded;
     mapping(uint256 => bool) public auctionFinalized;
 
+    // ============ Admin Role ============
+
+    mapping(address => bool) public admins;
+
     // ============ Events ============
 
     event AuctionCreated(uint256 indexed auctionId, uint256 start, uint256 end, uint256 minBid);
@@ -46,8 +50,14 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
     event AuctionFinalized(uint256 indexed auctionId, address[3] winners, uint256[3] amounts);
     event RefundClaimed(uint256 indexed auctionId, address indexed bidder, uint256 amount);
     event SlotMetadataUpdated(uint256 indexed auctionId, uint256 slotIndex);
+    event AdminUpdated(address indexed admin, bool enabled);
 
     // ============ Modifiers ============
+
+    modifier onlyAdmin() {
+        require(admins[msg.sender], "Not admin");
+        _;
+    }
 
     modifier auctionActive() {
         require(block.timestamp >= auctionStartTime, "Auction not started");
@@ -64,15 +74,29 @@ contract AuctionSystem is Ownable, ReentrancyGuard {
 
     constructor() Ownable(msg.sender) {
         minimumBidAmount = 0.000001 ether;
+        admins[msg.sender] = true;
+        emit AdminUpdated(msg.sender, true);
     }
 
     // ============ Admin Functions ============
+
+    function addAdmin(address admin) external onlyOwner {
+        require(admin != address(0), "Zero address");
+        admins[admin] = true;
+        emit AdminUpdated(admin, true);
+    }
+
+    function removeAdmin(address admin) external onlyOwner {
+        require(admin != address(0), "Zero address");
+        admins[admin] = false;
+        emit AdminUpdated(admin, false);
+    }
 
     function createAuction(
         uint256 _start,
         uint256 _end,
         uint256 _minBid
-    ) external onlyOwner {
+    ) external onlyAdmin {
         require(_start < _end, "Invalid time range");
         require(_end > block.timestamp, "End must be future");
         require(_minBid > 0, "Min bid zero");
