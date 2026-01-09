@@ -184,7 +184,8 @@ describe("AuctionSystemUpgradeable", function () {
 
       const tx = await auction.connect(dave).claimRefund();
       const receipt = await tx.wait();
-      const gas = receipt.gasUsed * receipt.gasPrice;
+      const gasPrice = receipt.gasPrice ?? receipt.effectiveGasPrice;
+      const gas = receipt.gasUsed * gasPrice;
 
       const after = await ethers.provider.getBalance(dave.address);
 
@@ -198,6 +199,13 @@ describe("AuctionSystemUpgradeable", function () {
       await expect(
         auction.connect(bob).claimRefund()
       ).to.be.revertedWith("Winner");
+    });
+
+    it("should not allow claiming refund twice", async function () {
+      await auction.connect(dave).claimRefund();
+      await expect(auction.connect(dave).claimRefund()).to.be.revertedWith(
+        "Already refunded"
+      );
     });
   });
 
@@ -220,7 +228,8 @@ describe("AuctionSystemUpgradeable", function () {
 
       const tx = await auction.withdrawWinningBids();
       const receipt = await tx.wait();
-      const gas = receipt.gasUsed * receipt.gasPrice;
+      const gasPrice = receipt.gasPrice ?? receipt.effectiveGasPrice;
+      const gas = receipt.gasUsed * gasPrice;
 
       const after = await ethers.provider.getBalance(owner.address);
 
@@ -236,6 +245,143 @@ describe("AuctionSystemUpgradeable", function () {
       await expect(
         auction.connect(alice).withdrawWinningBids()
       ).to.be.reverted;
+    });
+
+    it("should reject withdrawal if auction not finalized", async function () {
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+      await auction.createAuction(now + 1, now + 50, MIN_BID);
+      await increaseTime(2);
+      await auction.connect(alice).placeBid({ value: ethers.parseEther("0.05") });
+      await increaseTime(60);
+
+      await expect(auction.withdrawWinningBids()).to.be.revertedWith(
+        "Not finalized"
+      );
+    });
+  });
+
+  describe("Slot Metadata", function () {
+    beforeEach(async function () {
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+      await auction.createAuction(now + 1, now + 50, MIN_BID);
+      await increaseTime(2);
+
+      await auction.connect(alice).placeBid({ value: ethers.parseEther("0.05") });
+      await auction.connect(bob).placeBid({ value: ethers.parseEther("0.10") });
+      await auction.connect(carol).placeBid({ value: ethers.parseEther("0.08") });
+      await auction.connect(dave).placeBid({ value: ethers.parseEther("0.02") });
+
+      await increaseTime(60);
+      await auction.finalizeAuction();
+    });
+
+    it("should allow a winning slot owner to set metadata once", async function () {
+      const auctionId = await auction.currentAuctionId();
+
+      const slots = await auction.getCurrentAuctionSlots();
+      const slotIndex = slots.findIndex((s) => s.winner === bob.address);
+      expect(slotIndex).to.not.equal(-1);
+
+      await expect(
+        auction
+          .connect(bob)
+          .addMetadata(slotIndex, "Slot Name", "Desc", "ipfs://cid")
+      )
+        .to.emit(auction, "SlotMetadataUpdated")
+        .withArgs(auctionId, slotIndex);
+
+      const meta = await auction.getSlotMetadata(auctionId, slotIndex);
+      expect(meta.winner).to.equal(bob.address);
+      expect(meta.name).to.equal("Slot Name");
+      expect(meta.description).to.equal("Desc");
+      expect(meta.metadata).to.equal("ipfs://cid");
+
+      await expect(
+        auction
+          .connect(bob)
+          .addMetadata(slotIndex, "Again", "Again", "Again")
+      ).to.be.revertedWith("Name already set");
+    });
+
+    it("should reject metadata update from non-winner", async function () {
+      const slots = await auction.getCurrentAuctionSlots();
+      const slotIndex = slots.findIndex((s) => s.winner === bob.address);
+      expect(slotIndex).to.not.equal(-1);
+
+      await expect(
+        auction
+          .connect(dave)
+          .addMetadata(slotIndex, "X", "Y", "Z")
+      ).to.be.revertedWith("Not winner");
+    });
+
+    it("should reject empty name", async function () {
+      const slots = await auction.getCurrentAuctionSlots();
+      const slotIndex = slots.findIndex((s) => s.winner === bob.address);
+      expect(slotIndex).to.not.equal(-1);
+
+      await expect(
+        auction
+          .connect(bob)
+          .addMetadata(slotIndex, "", "Desc", "ipfs://cid")
+      ).to.be.revertedWith("Name cannot be empty");
+    });
+
+    it("should allow admin to modify metadata (post-auction)", async function () {
+      const auctionId = await auction.currentAuctionId();
+
+      // Set initial metadata by the winner
+      const slots = await auction.getCurrentAuctionSlots();
+      const slotIndex = slots.findIndex((s) => s.winner === bob.address);
+      expect(slotIndex).to.not.equal(-1);
+
+      await auction
+        .connect(bob)
+        .addMetadata(slotIndex, "Slot Name", "Desc", "ipfs://cid");
+
+      // Admin override
+      await expect(
+        auction.modifyMetadata(
+          slotIndex,
+          auctionId,
+          "Admin Name",
+          "Admin Desc",
+          "admin://meta"
+        )
+      )
+        .to.emit(auction, "SlotMetadataUpdated")
+        .withArgs(auctionId, slotIndex);
+
+      const meta = await auction.getSlotMetadata(auctionId, slotIndex);
+      expect(meta.name).to.equal("Admin Name");
+      expect(meta.description).to.equal("Admin Desc");
+      expect(meta.metadata).to.equal("admin://meta");
+    });
+  });
+
+  describe("Validation / Timing Reverts", function () {
+    it("should reject invalid auction creation params", async function () {
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+
+      await expect(
+        auction.createAuction(now + 100, now + 10, MIN_BID)
+      ).to.be.revertedWith("Invalid time range");
+
+      await expect(
+        auction.createAuction(now - 100, now - 1, MIN_BID)
+      ).to.be.revertedWith("End must be future");
+
+      await expect(
+        auction.createAuction(now + 1, now + 10, 0)
+      ).to.be.revertedWith("Min bid zero");
+    });
+
+    it("should reject finalizeAuction before auction end", async function () {
+      const now = (await ethers.provider.getBlock("latest")).timestamp;
+      await auction.createAuction(now + 1, now + 50, MIN_BID);
+      await increaseTime(2);
+
+      await expect(auction.finalizeAuction()).to.be.revertedWith("Auction ongoing");
     });
   });
 });

@@ -117,7 +117,7 @@ contract AuctionSystemUpgradeable is
         emit AuctionCreated(currentAuctionId, _start, _end, _minBid);
     }
 
-    function finalizeAuction() external onlyOwner auctionEnded {
+    function finalizeAuction() external onlyAdmin auctionEnded {
         require(!auctionFinalized[currentAuctionId], "Already finalized");
 
         (address[3] memory winners, uint256[3] memory amounts) = getTopBidders();
@@ -137,7 +137,7 @@ contract AuctionSystemUpgradeable is
         emit AuctionFinalized(currentAuctionId, winners, amounts);
     }
 
-    function updateSlotMetadata(
+    function addMetadata(
         uint256 slot,
         string calldata name,
         string calldata description,
@@ -145,15 +145,35 @@ contract AuctionSystemUpgradeable is
     ) external auctionEnded {
         require(slot < 3, "Invalid slot");
         require(auctionFinalized[currentAuctionId], "Not finalized");
+        require(bytes(name).length > 0, "Name cannot be empty");
 
         Slot storage s = auctionSlots[currentAuctionId][slot];
         require(msg.sender == s.winner, "Not winner");
+        require(bytes(s.name).length  == 0, "Name already set");
 
         s.name = name;
         s.description = description;
         s.metadata = metadata;
 
         emit SlotMetadataUpdated(currentAuctionId, slot);
+    }
+
+    function modifyMetadata(
+        uint256 slot,
+        uint256 auctionId,
+        string calldata name,
+        string calldata description,
+        string calldata metadata
+    ) external auctionEnded onlyAdmin {
+        require(slot < 3, "Invalid slot");
+        require(auctionFinalized[auctionId], "Not finalized");
+
+        Slot storage s = auctionSlots[auctionId][slot];
+        s.name = name;
+        s.description = description;
+        s.metadata = metadata;
+
+        emit SlotMetadataUpdated(auctionId, slot);
     }
 
     function withdrawWinningBids() external onlyOwner nonReentrant {
@@ -263,6 +283,31 @@ contract AuctionSystemUpgradeable is
         if (block.timestamp >= auctionEndTime) return 0;
         return auctionEndTime - block.timestamp;
     }
+
+    function getSlotMetadata(
+    uint256 auctionId,
+    uint256 slot
+)
+    external
+    view
+    returns (
+        address winner,
+        uint256 bidAmount,
+        string memory name,
+        string memory description,
+        string memory metadata
+    )
+{
+    require(slot < 3, "Invalid slot");
+    Slot storage s = auctionSlots[auctionId][slot];
+    return (
+        s.winner,
+        s.bidAmount,
+        s.name,
+        s.description,
+        s.metadata
+    );
+}
 
     receive() external payable {}
 
