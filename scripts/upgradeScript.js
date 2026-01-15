@@ -1,7 +1,7 @@
 const { ethers, upgrades } = require("hardhat");
 
 async function main() {
-  const proxyAddress = "0x541357D9D59a6818011419899C0D0c5DfcBe657D";
+  const proxyAddress = "0x4891684b367dee27Fbf12E515D6dD188B288e28d";
 
   const AuctionV2 = await ethers.getContractFactory(
     "AuctionSystemUpgradeable"
