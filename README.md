@@ -1,130 +1,133 @@
-# Auction System (Base / EVM)
+# Featured Community Auction
 
-Slot-based auction smart contract where the **top 3 bidders** win **3 slots**. Runs on any EVM chain (Base, Base Sepolia, etc).
+A Solidity smart contract for running daily auctions where communities compete for Featured Community exposure slots.
 
-## Requirements covered
+## Features
 
-- **Admin sets auction start time and end time**
-- **Admin sets minimum bid amount**
-- **Each auction has 3 slots** (winner + metadata fields)
-- **Top 3 bidders win the 3 slots**
-- **Admin can refund everyone except top 3** (batch refund)
+- **Daily 24-hour Auctions**: New auction starts every day
+- **3-Day Featured Rotation**: Winners get 3 days of featured placement
+- **3 Visible Slots**: Newest winner at top, rotating down daily
+- **No Pre-registration**: Community details submitted directly with bids
+- **Admin Control**: Only admins can edit featured community metadata
+- **UUPS Upgradeable**: Contract can be upgraded without losing state
 
-## Tech stack
+## Simplified Flow
 
-- **Solidity**: `0.8.20`
-- **Hardhat** + **ethers v6**
-- **OpenZeppelin**: `Ownable`, `ReentrancyGuard`
+```
+User places bid with (name, description, link) → Wins auction → Featured in Slot #1
+                                                                        ↓
+                                          Admin can edit metadata if needed
+```
 
-## Project structure
+### Featured Slot Rotation
 
-- **Contract**: `contracts/AuctionSystem.sol`
-- **Tests**: `test/AuctionSystem.test.js`
-- **Deploy script**: `scripts/deploy.js`
-- **Example admin script**: `scripts/adminAction.js`
-- **Config**: `hardhat.config.js`
+```
+Day 1: Winner A → Slot #1
+Day 2: Winner B → Slot #1, Winner A → Slot #2
+Day 3: Winner C → Slot #1, Winner B → Slot #2, Winner A → Slot #3
+Day 4: Winner D → Slot #1, Winner C → Slot #2, Winner B → Slot #3, Winner A rotates out
+```
 
-## Install
+## Role Hierarchy
+
+| Role | Capabilities |
+|------|--------------|
+| **Owner** | Add/remove admins, update treasury, pause/unpause, emergency functions, upgrade contract, all Admin privileges |
+| **Admin** | Start auctions, edit featured community metadata (name, description, link), update bid settings |
+| **User** | Place bids with community details, finalize ended auctions |
+
+## Installation
 
 ```bash
 npm install
+cp .env.example .env
+# Edit .env with your values
 ```
 
-## Compile
+## Usage
 
 ```bash
+# Compile
 npm run compile
+
+# Test
+npm run test
+
+# Deploy
+npm run deploy:sepolia   # Testnet
+npm run deploy:mainnet   # Mainnet
+
+# Upgrade (set PROXY_ADDRESS in .env first)
+npm run upgrade:sepolia
 ```
 
-## Test
+## Contract Functions
 
-```bash
-npm test
+### Bidding
+
+```solidity
+// Place a bid with community details
+function placeBid(
+    string calldata _name,
+    string calldata _description,
+    string calldata _link
+) external payable;
 ```
 
-## Add an admin (owner-only)
+### Featured Community Management (Admin Only)
 
-If you deployed the contract behind a proxy, use the **proxy address**:
+```solidity
+// Update all metadata for a featured slot
+function updateFeaturedCommunity(
+    uint256 _slotIndex,        // 0, 1, or 2
+    string calldata _name,
+    string calldata _description,
+    string calldata _link
+) external;
 
-```bash
-npx hardhat run scripts/addAdmin.js --network <network>
+// Update only the link
+function updateFeaturedLink(uint256 _slotIndex, string calldata _link) external;
 ```
 
-## Environment variables
+### Key View Functions
 
-Create a `.env` file in `auction-system/`:
+```solidity
+// Get all 3 featured slots with full details
+function getFeaturedSlots() external view returns (FeaturedSlot[3] memory);
 
-```bash
-PRIVATE_KEY=0xyour_private_key
-SEPOLIA_RPC_URL=https://...
+// Get active featured communities
+function getActiveFeatured() external view returns (
+    string[3] memory names,
+    string[3] memory descriptions,
+    string[3] memory links,
+    address[3] memory winners,
+    bool[3] memory activeStatus
+);
+
+// Get current auction info
+function getCurrentAuction() external view returns (...);
+
+// Get minimum bid required
+function getMinimumBid() external view returns (uint256);
 ```
 
-## Contract overview
+## Events
 
-### Core state
+```solidity
+event BidPlaced(uint256 indexed auctionId, address indexed bidder, uint256 amount, string communityName, string communityLink);
+event AuctionFinalized(uint256 indexed auctionId, address indexed winner, uint256 winningBid, string communityName);
+event FeaturedCommunityUpdated(uint256 indexed slotIndex, uint256 indexed auctionId, string newName, string newDescription, string newLink);
+event FeaturedSlotsRotated(uint256[3] auctionIds);
+```
 
-- **`currentAuctionId`**: increments each time `createAuction()` is called
-- **`auctionStartTime` / `auctionEndTime`**: active auction time window
-- **`minimumBidAmount`**: minimum value per bid transaction
-- **`auctionSlots[auctionId][0..2]`**: the 3 slot records (winner + bidAmount + metadata)
-- **`bidderTotalAmount[auctionId][bidder]`**: cumulative total bid per bidder
+## Security Features
 
-### How bidding works
+- ReentrancyGuard on all ETH transfers
+- Pausable for emergencies
+- UUPS upgradeable pattern
+- Automatic refund of outbid users
+- Custom errors for gas efficiency
 
-- Users call **`placeBid()`** and send ETH.
-- Each call must send at least **`minimumBidAmount`**.
-- Contract keeps a running total per bidder; winners are computed from totals.
+## License
 
-### Determine winners (top 3)
-
-- Winners are derived by calling **`getTopBidders()`**, which returns:
-  - `address[3] winners`
-  - `uint256[3] amounts`
-
-### Typical flow (admin + users)
-
-1) **Admin: create auction**
-
-- `createAuction(startTimestamp, endTimestamp, minBidWei)`
-
-2) **Users: bid**
-
-- `placeBid()` (payable)
-
-3) **Admin: finalize after end**
-
-- `finalizeAuction()`
-- Sets slot winners and their winning bid totals.
-
-4) **Refund non-winners**
-
-Two supported approaches:
-
-- **Admin batch refund (one transaction)**:
-  - `refundAllExceptTop3()`
-  - Iterates all bidders for the current auction and refunds everyone except winners.
-  - ⚠️ Can run out of gas if there are many bidders.
-
-- **User self-claim**:
-  - `claimRefund()`
-  - Reverts for winners, and for already-refunded bidders.
-
-5) **Admin withdraws winning bids**
-
-- `withdrawWinningBids()`
-- Transfers the sum of the 3 winning bid totals to the contract owner.
-
-### Slot metadata
-
-Each auction has 3 slots:
-
-- `Slot.winner` (address)
-- `Slot.bidAmount` (uint256)
-- `Slot.name` (string)
-- `Slot.description` (string)
-- `Slot.metadata` (string)
-
-Admin can set slot metadata **before finalization**:
-
-- `updateSlotMetadata(slotIndex, name, description, metadata)`
-
+MIT
